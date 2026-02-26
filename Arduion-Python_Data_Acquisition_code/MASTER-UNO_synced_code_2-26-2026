@@ -1,0 +1,106 @@
+// WORKING CODE AS OF 2/26/2026, last code broke because of overflow in the runDuration (micros got too big, switched to millis)
+
+#include <Wire.h>
+
+// ===== CONFIGURATION =====
+const unsigned long runDuration = 240UL * 60UL * 1000UL;   // 240 minutes (ms)
+const unsigned long syncInterval = 5UL * 60UL * 1000UL;    // 5 minutes (ms)
+const int SYNC_PIN = 6;
+
+const byte nanoAddresses[] = {
+  0x08, 0x09, 0x0A, 0x0B,
+  0x0C, 0x0D, 0x0E, 0x0F
+};
+
+const int numNanos = sizeof(nanoAddresses) / sizeof(nanoAddresses[0]);
+
+unsigned long startTimeMS = 0;
+unsigned long lastSyncTimeMS = 0;
+
+void setup() {
+  Wire.begin();
+  Serial.begin(9600);
+
+  pinMode(SYNC_PIN, OUTPUT);
+  digitalWrite(SYNC_PIN, LOW);
+
+  startTimeMS = millis();
+
+  // ⏱️ ORIGINAL FORMAT PRESERVED
+  Serial.print("MST: ");
+  Serial.println(micros());
+}
+
+void loop() {
+  unsigned long nowMS = millis();
+
+  // Stop after 240 minutes (no overflow now)
+  if (nowMS - startTimeMS >= runDuration) {
+    Serial.println("Done");
+    while (true);
+  }
+
+  // Sync every 5 minutes
+  if (nowMS - lastSyncTimeMS >= syncInterval || lastSyncTimeMS == 0) {
+    sendSyncPulse();
+    lastSyncTimeMS = nowMS;
+  }
+
+  requestTimestamps();
+}
+
+void sendSyncPulse() {
+  unsigned long nowUS = micros();
+
+  // ORIGINAL FORMAT PRESERVED
+  Serial.print("MS: ");
+  Serial.println(nowUS);
+
+  digitalWrite(SYNC_PIN, HIGH);
+  delay(10);
+  digitalWrite(SYNC_PIN, LOW);
+}
+
+void requestTimestamps() {
+  for (int i = 0; i < numNanos; i++) {
+
+    byte addr = nanoAddresses[i];
+    Wire.requestFrom(addr, (uint8_t)6);
+
+    if (Wire.available() == 6) {
+
+      unsigned long timestamp = 0;
+      for (int j = 0; j < 4; j++) {
+        ((byte *)&timestamp)[j] = Wire.read();
+      }
+
+      byte slaveID = Wire.read();
+      byte dataType = Wire.read();
+
+      if (timestamp == 0xFFFFFFFF) {
+        continue;  // FIXED (was return)
+      }
+
+      // ===== ORIGINAL OUTPUT FORMAT =====
+      Serial.print(slaveID);
+      Serial.print(",");
+
+      if (dataType == 1) {
+        Serial.print("PT,");
+      } 
+      else if (dataType == 2) {
+        Serial.print("ST,");
+      } 
+      else if (dataType == 3) {
+        Serial.print("Start, ");
+      } 
+      else {
+        Serial.print("UT ");
+        Serial.print(dataType);
+        Serial.print(": ");
+      }
+
+      Serial.println(timestamp);
+    }
+  }
+}
